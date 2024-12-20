@@ -1081,14 +1081,21 @@ class RadarSensor(object):
         # To get a numpy [[vel, altitude, azimuth, depth],...[,,,]]:
         # points = np.frombuffer(radar_data.raw_data, dtype=np.dtype('f4'))
         # points = np.reshape(points, (len(radar_data), 4))
-
+       # 获取雷达数据的旋转信息，后续可能用于坐标变换等操作，使其与整个场景的坐标系相匹配
         current_rot = radar_data.transform.rotation
+      #遍历雷达数据中的每一个探测结果（detect）
         for detect in radar_data:
+            #将探测目标的方位角（azimuth）从弧度制转换为角度制，以便后续处理和直观理解
             azi = math.degrees(detect.azimuth)
+           # 将探测目标的仰角（altitude）从弧度制转换为角度制，用于后续相关的坐标变换等操作
             alt = math.degrees(detect.altitude)
             # The 0.25 adjusts a bit the distance so the dots can
             # be properly seen
             fw_vec = carla.Vector3D(x=detect.depth - 0.25)
+            # 创建一个carla.Transform对象，用于坐标变换相关操作
+            # 它的位置部分是默认的carla.Location()（通常表示原点位置）
+            # 旋转部分则是在当前整体旋转（current_rot）的基础上，根据当前探测目标的方位角（加到yaw）和仰角（加到pitch）进行调整
+            # 然后利用这个变换对象对之前创建的fw_vec向量进行变换，目的可能是将目标在雷达坐标系下的向量转换到整个模拟场景的世界坐标系下
             carla.Transform(
                 carla.Location(),
                 carla.Rotation(
@@ -1096,13 +1103,26 @@ class RadarSensor(object):
                     yaw=current_rot.yaw + azi,
                     roll=current_rot.roll)).transform(fw_vec)
 
+            # 定义一个函数clamp，用于将值限定在给定的最小值（min_v）和最大值（max_v）范围内
+            #具体做法是返回给定值（value）在[min_v, max_v]区间内的值
             def clamp(min_v, max_v, value):
                 return max(min_v, min(value, max_v))
 
             norm_velocity = detect.velocity / self.velocity_range # range [-1, 1]
+            # 根据归一化后的速度计算红色通道（r）的值
+            # 通过clamp函数将1.0 - norm_velocity的值限定在[0.0, 1.0]范围内，再乘以255.0转换为0-255的颜色分量值（整数）
             r = int(clamp(0.0, 1.0, 1.0 - norm_velocity) * 255.0)
+            # 根据归一化后的速度计算绿色通道（g）的值
+            # 通过clamp函数将1.0 - abs(norm_velocity)的值限定在[0.0, 1.0]范围内，再乘以255.0转换为0-255的颜色分量值（整数）
             g = int(clamp(0.0, 1.0, 1.0 - abs(norm_velocity)) * 255.0)
+            # 根据归一化后的速度计算蓝色通道（b）的值
+            # 通过clamp函数对-1.0 - norm_velocity先取绝对值，再限定在[0.0, 1.0]范围内，最后乘以255.0转换为0-255的颜色分量值（整数）
             b = int(abs(clamp(- 1.0, 0.0, - 1.0 - norm_velocity)) * 255.0)
+            # 使用self.debug对象（可能是用于调试可视化的相关对象）在指定位置绘制一个点来表示雷达探测到的目标
+            # 位置是雷达数据的变换位置（radar_data.transform.location）加上经过处理的向量fw_vec
+            # 点的大小设置为0.075，生命周期设置为0.06秒，表示这个点在画面上显示的时长
+            # persistent_lines设置为False，表示不是持久的线条（具体含义可能和绘制的相关规则有关）
+            #颜色使用前面计算好的由r、g、b组成的carla.Color对象
             self.debug.draw_point(
                 radar_data.transform.location + fw_vec,
                 size=0.075,
